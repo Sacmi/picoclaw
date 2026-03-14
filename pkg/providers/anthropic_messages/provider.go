@@ -221,11 +221,19 @@ func buildRequestBody(
 
 			// Add tool_use blocks
 			for _, tc := range msg.ToolCalls {
+				name := tc.Name
+				if name == "" && tc.Function != nil {
+					name = tc.Function.Name
+				}
+				args := tc.Arguments
+				if args == nil && tc.Function != nil && tc.Function.Arguments != "" {
+					json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
+				}
 				toolUse := map[string]any{
 					"type":  "tool_use",
 					"id":    tc.ID,
-					"name":  tc.Name,
-					"input": tc.Arguments,
+					"name":  name,
+					"input": args,
 				}
 				content = append(content, toolUse)
 			}
