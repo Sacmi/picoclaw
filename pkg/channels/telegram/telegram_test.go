@@ -460,3 +460,47 @@ func TestHandleMessage_ReplyThread_NonForum_NoIsolation(t *testing.T) {
 	assert.Empty(t, inbound.Metadata["parent_peer_kind"])
 	assert.Empty(t, inbound.Metadata["parent_peer_id"])
 }
+
+func TestHandleMessage_PrivateChatTopic_SetsMetadata(t *testing.T) {
+	messageBus := bus.NewMessageBus()
+	ch := &TelegramChannel{
+		BaseChannel: channels.NewBaseChannel("telegram", nil, messageBus, nil),
+		chatIDs:     make(map[string]int64),
+		ctx:         context.Background(),
+	}
+
+	msg := &telego.Message{
+		Text:            "hello from private topic",
+		MessageID:       30,
+		MessageThreadID: 5,
+		IsTopicMessage:  true,
+		Chat: telego.Chat{
+			ID:   123,
+			Type: "private",
+		},
+		From: &telego.User{
+			ID:        123,
+			FirstName: "Dave",
+		},
+	}
+
+	err := ch.handleMessage(context.Background(), msg)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	inbound, ok := messageBus.ConsumeInbound(ctx)
+	require.True(t, ok, "expected inbound message")
+
+	// Composite chatID should include thread ID
+	assert.Equal(t, "123/5", inbound.ChatID)
+
+	// Peer kind stays "direct" for private chat, but ID includes thread for session isolation
+	assert.Equal(t, "direct", inbound.Peer.Kind)
+	assert.Equal(t, "123/5", inbound.Peer.ID)
+
+	// Parent peer metadata should be set for agent binding
+	assert.Equal(t, "topic", inbound.Metadata["parent_peer_kind"])
+	assert.Equal(t, "5", inbound.Metadata["parent_peer_id"])
+}

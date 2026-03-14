@@ -417,6 +417,13 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		return fmt.Errorf("message sender (user) is nil")
 	}
 
+	// Skip service messages about topic lifecycle (created/edited/closed/reopened).
+	if message.ForumTopicCreated != nil || message.ForumTopicEdited != nil ||
+		message.ForumTopicClosed != nil || message.ForumTopicReopened != nil ||
+		message.GeneralForumTopicHidden != nil || message.GeneralForumTopicUnhidden != nil {
+		return nil
+	}
+
 	platformID := fmt.Sprintf("%d", user.ID)
 	sender := bus.SenderInfo{
 		Platform:    "telegram",
@@ -538,7 +545,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	// must share one session per group.
 	compositeChatID := fmt.Sprintf("%d", chatID)
 	threadID := message.MessageThreadID
-	if message.Chat.IsForum && threadID != 0 {
+	if (message.Chat.IsForum || message.IsTopicMessage) && threadID != 0 {
 		compositeChatID = fmt.Sprintf("%d/%d", chatID, threadID)
 	}
 
@@ -554,6 +561,8 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	if message.Chat.Type != "private" {
 		peerKind = "group"
 		peerID = compositeChatID
+	} else if message.IsTopicMessage && threadID != 0 {
+		peerID = compositeChatID // unique session per topic in private chat
 	}
 
 	peer := bus.Peer{Kind: peerKind, ID: peerID}
@@ -567,7 +576,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	}
 
 	// Set parent_peer metadata for per-topic agent binding.
-	if message.Chat.IsForum && threadID != 0 {
+	if (message.Chat.IsForum || message.IsTopicMessage) && threadID != 0 {
 		metadata["parent_peer_kind"] = "topic"
 		metadata["parent_peer_id"] = fmt.Sprintf("%d", threadID)
 	}
