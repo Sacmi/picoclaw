@@ -135,6 +135,16 @@ func (m *Manager) RecordTypingStop(channel, chatID string, stop func()) {
 	}
 }
 
+// StopTyping stops and clears any pending typing indicator for channel/chatID.
+func (m *Manager) StopTyping(channel, chatID string) {
+	key := channel + ":" + chatID
+	if v, loaded := m.typingStops.LoadAndDelete(key); loaded {
+		if entry, ok := v.(typingEntry); ok && entry.stop != nil {
+			entry.stop()
+		}
+	}
+}
+
 // RecordReactionUndo registers a reaction undo function for later invocation.
 // Implements PlaceholderRecorder.
 func (m *Manager) RecordReactionUndo(channel, chatID string, undo func()) {
@@ -148,11 +158,7 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 	key := name + ":" + msg.ChatID
 
 	// 1. Stop typing
-	if v, loaded := m.typingStops.LoadAndDelete(key); loaded {
-		if entry, ok := v.(typingEntry); ok {
-			entry.stop() // idempotent, safe
-		}
-	}
+	m.StopTyping(name, msg.ChatID)
 
 	// 2. Undo reaction
 	if v, loaded := m.reactionUndos.LoadAndDelete(key); loaded {

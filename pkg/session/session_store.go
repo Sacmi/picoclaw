@@ -27,6 +27,8 @@ type SessionStore interface {
 	TruncateHistory(key string, keepLast int)
 	// Save persists any pending state to durable storage.
 	Save(key string) error
+	// DeleteSession removes the session from memory and durable storage.
+	DeleteSession(key string) error
 	// Close releases resources held by the store.
 	Close() error
 }

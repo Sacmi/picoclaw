@@ -1914,6 +1914,42 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			agent.Sessions.Save(opts.SessionKey)
 			return nil
 		}
+		rt.DeleteTopic = func() error {
+			if opts == nil {
+				return fmt.Errorf("process options not available")
+			}
+			if agent.Sessions == nil {
+				return fmt.Errorf("sessions not initialized for agent")
+			}
+			if opts.Channel != "telegram" {
+				return fmt.Errorf("this command only works inside a Telegram topic")
+			}
+			if al.channelManager == nil {
+				return fmt.Errorf("channel manager not initialized")
+			}
+			ch, ok := al.channelManager.GetChannel("telegram")
+			if !ok {
+				return fmt.Errorf("telegram channel not found or not enabled")
+			}
+			deleter, ok := ch.(interface {
+				DeleteTopic(context.Context, string) error
+			})
+			if !ok {
+				return fmt.Errorf("telegram channel does not support topic deletion")
+			}
+			al.channelManager.StopTyping(opts.Channel, opts.ChatID)
+			if err := deleter.DeleteTopic(context.Background(), opts.ChatID); err != nil {
+				return err
+			}
+			if err := agent.Sessions.DeleteSession(opts.SessionKey); err != nil {
+				logger.WarnCF("agent", "Deleted Telegram topic but failed to delete session", map[string]any{
+					"session_key": opts.SessionKey,
+					"chat_id":     opts.ChatID,
+					"error":       err.Error(),
+				})
+			}
+			return nil
+		}
 	}
 	return rt
 }

@@ -2,6 +2,8 @@ package session_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/memory"
@@ -175,5 +177,34 @@ func TestJSONLBackend_SummarizeFlow(t *testing.T) {
 	}
 	if history[0].Content != "msg 16" {
 		t.Errorf("first message = %q, want %q", history[0].Content, "msg 16")
+	}
+}
+
+func TestJSONLBackend_DeleteSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	b := session.NewJSONLBackend(store)
+
+	b.AddMessage("s1", "user", "hello")
+	b.SetSummary("s1", "summary")
+
+	if err := b.DeleteSession("s1"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if got := b.GetHistory("s1"); len(got) != 0 {
+		t.Fatalf("expected empty history after delete, got %d", len(got))
+	}
+	if got := b.GetSummary("s1"); got != "" {
+		t.Fatalf("expected empty summary after delete, got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "s1.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("expected jsonl file to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "s1.meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected meta file to be removed, stat err=%v", err)
 	}
 }

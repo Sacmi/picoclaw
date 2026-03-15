@@ -37,6 +37,9 @@ type Store interface {
 	// data. Backends that do not accumulate dead data may return nil.
 	Compact(ctx context.Context, sessionKey string) error
 
+	// DeleteSession removes all persisted state for a session.
+	DeleteSession(ctx context.Context, sessionKey string) error
+
 	// Close releases any resources held by the store.
 	Close() error
 }

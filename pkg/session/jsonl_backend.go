@@ -68,6 +68,10 @@ func (b *JSONLBackend) TruncateHistory(key string, keepLast int) {
 	}
 }
 
+func (b *JSONLBackend) DeleteSession(key string) error {
+	return b.store.DeleteSession(context.Background(), key)
+}
+
 // Save persists session state. Since the JSONL store fsyncs every write
 // immediately, the data is already durable. Save runs compaction to reclaim
 // space from logically truncated messages (no-op when there are none).

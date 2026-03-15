@@ -235,6 +235,27 @@ func (sm *SessionManager) Save(key string) error {
 	return nil
 }
 
+func (sm *SessionManager) DeleteSession(key string) error {
+	filename := sanitizeFilename(key)
+	if filename == "." || !filepath.IsLocal(filename) {
+		return os.ErrInvalid
+	}
+
+	sm.mu.Lock()
+	delete(sm.sessions, key)
+	sm.mu.Unlock()
+
+	if sm.storage == "" {
+		return nil
+	}
+
+	sessionPath := filepath.Join(sm.storage, filename+".json")
+	if err := os.Remove(sessionPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func (sm *SessionManager) loadSessions() error {
 	files, err := os.ReadDir(sm.storage)
 	if err != nil {

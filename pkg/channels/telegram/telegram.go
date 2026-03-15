@@ -277,6 +277,30 @@ func (c *TelegramChannel) StartTyping(ctx context.Context, chatID string) (func(
 	return cancel, nil
 }
 
+// DeleteTopic deletes the Telegram topic identified by chatID/threadID.
+func (c *TelegramChannel) DeleteTopic(ctx context.Context, chatID string) error {
+	if !c.IsRunning() {
+		return channels.ErrNotRunning
+	}
+
+	cid, threadID, err := parseTelegramChatID(chatID)
+	if err != nil {
+		return fmt.Errorf("invalid Telegram topic ID: %w", err)
+	}
+	if threadID <= 0 {
+		return fmt.Errorf("this command only works inside a Telegram topic")
+	}
+
+	params := &telego.DeleteForumTopicParams{
+		ChatID:          tu.ID(cid),
+		MessageThreadID: threadID,
+	}
+	if err := c.bot.DeleteForumTopic(ctx, params); err != nil {
+		return fmt.Errorf("failed to delete Telegram topic: %w", err)
+	}
+	return nil
+}
+
 // EditMessage implements channels.MessageEditor.
 func (c *TelegramChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
 	cid, _, err := parseTelegramChatID(chatID)

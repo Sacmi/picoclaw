@@ -83,3 +83,32 @@ func TestSave_RejectsPathTraversal(t *testing.T) {
 		t.Errorf("expected foo_bar.json in storage (sanitized from foo/bar)")
 	}
 }
+
+func TestDeleteSession_RemovesMemoryAndFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+	key := "telegram:123/5"
+
+	sm.AddMessage(key, "user", "hello")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save(%q) failed: %v", key, err)
+	}
+
+	path := filepath.Join(tmpDir, "telegram_123_5.json")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected session file to exist before delete: %v", err)
+	}
+
+	if err := sm.DeleteSession(key); err != nil {
+		t.Fatalf("DeleteSession(%q) failed: %v", key, err)
+	}
+	if got := sm.GetHistory(key); len(got) != 0 {
+		t.Fatalf("expected empty history after delete, got %d messages", len(got))
+	}
+	if got := sm.GetSummary(key); got != "" {
+		t.Fatalf("expected empty summary after delete, got %q", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected session file to be removed, stat err=%v", err)
+	}
+}

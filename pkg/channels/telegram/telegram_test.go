@@ -329,6 +329,37 @@ func TestSend_WithForumThreadID(t *testing.T) {
 	assert.Len(t, caller.calls, 1)
 }
 
+func TestDeleteTopic_WithThreadID(t *testing.T) {
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			return &ta.Response{Ok: true}, nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+
+	err := ch.DeleteTopic(context.Background(), "123/5")
+
+	assert.NoError(t, err)
+	assert.Len(t, caller.calls, 1)
+	assert.Contains(t, caller.calls[0].URL, "deleteForumTopic")
+}
+
+func TestDeleteTopic_RejectsNonTopicChat(t *testing.T) {
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			t.Fatal("DeleteForumTopic should not be called without a thread ID")
+			return nil, nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+
+	err := ch.DeleteTopic(context.Background(), "123")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "only works inside a Telegram topic")
+	assert.Empty(t, caller.calls)
+}
+
 func TestHandleMessage_ForumTopic_SetsMetadata(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	ch := &TelegramChannel{

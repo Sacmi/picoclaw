@@ -647,6 +647,25 @@ func TestRecordTypingStop_ReplacesExistingStop(t *testing.T) {
 	}
 }
 
+func TestStopTyping_ClearsPendingStop(t *testing.T) {
+	m := newTestManager()
+	called := 0
+
+	m.RecordTypingStop("test", "123", func() {
+		called++
+	})
+
+	m.StopTyping("test", "123")
+	m.StopTyping("test", "123")
+
+	if called != 1 {
+		t.Fatalf("expected stop func to be called once, got %d", called)
+	}
+	if _, loaded := m.typingStops.Load("test:123"); loaded {
+		t.Fatal("expected typing stop to be removed")
+	}
+}
+
 func TestSendWithRetry_PreSendEditsPlaceholder(t *testing.T) {
 	m := newTestManager()
 	var sendCalled bool

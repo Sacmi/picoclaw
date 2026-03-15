@@ -438,6 +438,23 @@ func (s *JSONLStore) Compact(
 	return s.rewriteJSONL(sessionKey, active)
 }
 
+func (s *JSONLStore) DeleteSession(
+	_ context.Context, sessionKey string,
+) error {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	paths := []string{s.jsonlPath(sessionKey), s.metaPath(sessionKey)}
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("memory: delete session %s: %w", filepath.Base(path), err)
+		}
+	}
+
+	return nil
+}
+
 // rewriteJSONL atomically replaces the JSONL file with the given messages
 // using the project's standard WriteFileAtomic (temp + fsync + rename).
 func (s *JSONLStore) rewriteJSONL(

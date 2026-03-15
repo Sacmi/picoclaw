@@ -143,3 +143,53 @@ func TestBuiltinListAgents_RestoresOldBehavior(t *testing.T) {
 		t.Fatalf("/list agents reply=%q, want agent IDs", reply)
 	}
 }
+
+func TestBuiltinDelete_UsesRuntimeDeleteTopic(t *testing.T) {
+	rt := &Runtime{}
+	called := false
+	rt.DeleteTopic = func() error {
+		called = true
+		return nil
+	}
+
+	defs := BuiltinDefinitions()
+	ex := NewExecutor(NewRegistry(defs), rt)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/delete",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/delete: outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if !called {
+		t.Fatal("expected DeleteTopic runtime callback to be called")
+	}
+	if reply != "" {
+		t.Fatalf("expected no success reply, got %q", reply)
+	}
+}
+
+func TestBuiltinDelete_UnavailableWithoutRuntime(t *testing.T) {
+	defs := BuiltinDefinitions()
+	ex := NewExecutor(NewRegistry(defs), nil)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/delete",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/delete: outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != unavailableMsg {
+		t.Fatalf("reply=%q, want=%q", reply, unavailableMsg)
+	}
+}
