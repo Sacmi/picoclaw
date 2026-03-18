@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mymmrac/telego"
 	ta "github.com/mymmrac/telego/telegoapi"
@@ -644,7 +645,15 @@ func TestHandleMessage_PrivateChatTopic_SetsMetadata(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	inbound, ok := messageBus.ConsumeInbound(ctx)
+	var (
+		inbound bus.InboundMessage
+		ok      bool
+	)
+	select {
+	case inbound, ok = <-messageBus.InboundChan():
+	case <-ctx.Done():
+		require.FailNow(t, "expected inbound message before timeout")
+	}
 	require.True(t, ok, "expected inbound message")
 
 	// Composite chatID should include thread ID
