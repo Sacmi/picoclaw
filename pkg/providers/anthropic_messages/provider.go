@@ -225,15 +225,20 @@ func buildRequestBody(
 				if name == "" && tc.Function != nil {
 					name = tc.Function.Name
 				}
-				args := tc.Arguments
-				if args == nil && tc.Function != nil && tc.Function.Arguments != "" {
-					json.Unmarshal([]byte(tc.Function.Arguments), &args) //nolint:errcheck
+
+				input := tc.Arguments
+				if input == nil && tc.Function != nil && tc.Function.Arguments != "" {
+					json.Unmarshal([]byte(tc.Function.Arguments), &input) //nolint:errcheck
 				}
+				if input == nil {
+					input = map[string]any{}
+				}
+
 				toolUse := map[string]any{
 					"type":  "tool_use",
 					"id":    tc.ID,
 					"name":  name,
-					"input": args,
+					"input": input,
 				}
 				content = append(content, toolUse)
 			}
