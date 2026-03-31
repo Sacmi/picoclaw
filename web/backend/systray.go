@@ -3,7 +3,6 @@
 package main
 
 import (
-	_ "embed"
 	"fmt"
 
 	"fyne.io/systray"
@@ -13,7 +12,7 @@ import (
 )
 
 func runTray() {
-	systray.Run(onReady, shutdownApp)
+	systray.Run(onReady, onExit)
 }
 
 // onReady is called when the system tray is ready
@@ -89,7 +88,7 @@ func onReady() {
 	}
 }
 
-// getIcon returns the system tray icon
-func getIcon() []byte {
-	return iconData
+// onExit is called when the system tray is exiting
+func onExit() {
+	logger.Info(T(Exiting))
 }

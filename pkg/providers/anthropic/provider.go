@@ -180,9 +180,9 @@ func buildParams(
 					blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
 				}
 				for _, tc := range msg.ToolCalls {
-					name := tc.Name
-					if name == "" && tc.Function != nil {
-						name = tc.Function.Name
+					// Skip tool calls with empty names to avoid API errors
+					if tc.Name == "" {
+						continue
 					}
 					args := tc.Arguments
 					if args == nil && tc.Function != nil && tc.Function.Arguments != "" {
@@ -193,7 +193,7 @@ func buildParams(
 					if args == nil {
 						args = map[string]any{}
 					}
-					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, args, name))
+					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, args, tc.Name))
 				}
 				anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
 			} else {

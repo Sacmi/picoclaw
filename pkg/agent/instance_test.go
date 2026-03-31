@@ -22,7 +22,7 @@ func TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
-				Model:             "test-model",
+				ModelName:         "test-model",
 				MaxTokens:         1234,
 				MaxToolIterations: 5,
 			},
@@ -54,7 +54,7 @@ func TestNewAgentInstance_DefaultsTemperatureWhenZero(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
-				Model:             "test-model",
+				ModelName:         "test-model",
 				MaxTokens:         1234,
 				MaxToolIterations: 5,
 			},
@@ -83,7 +83,7 @@ func TestNewAgentInstance_DefaultsTemperatureWhenUnset(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
-				Model:             "test-model",
+				ModelName:         "test-model",
 				MaxTokens:         1234,
 				MaxToolIterations: 5,
 			},
@@ -137,10 +137,10 @@ func TestNewAgentInstance_ResolveCandidatesFromModelListAlias(t *testing.T) {
 				Agents: config.AgentsConfig{
 					Defaults: config.AgentDefaults{
 						Workspace: tmpDir,
-						Model:     tt.aliasName,
+						ModelName: tt.aliasName,
 					},
 				},
-				ModelList: []config.ModelConfig{
+				ModelList: []*config.ModelConfig{
 					{
 						ModelName: tt.aliasName,
 						Model:     tt.modelName,
@@ -244,5 +244,39 @@ func TestNewAgentInstance_AllowsMediaTempDirForReadListAndExec(t *testing.T) {
 	}
 	if !strings.Contains(execResult.ForLLM, "attachment content") {
 		t.Fatalf("exec output missing media content: %s", execResult.ForLLM)
+	}
+}
+
+func TestNewAgentInstance_InvalidExecConfigDoesNotExit(t *testing.T) {
+	workspace := t.TempDir()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace: workspace,
+				ModelName: "test-model",
+			},
+		},
+		Tools: config.ToolsConfig{
+			ReadFile: config.ReadFileToolConfig{Enabled: true},
+			Exec: config.ExecConfig{
+				ToolConfig:         config.ToolConfig{Enabled: true},
+				EnableDenyPatterns: true,
+				CustomDenyPatterns: []string{"[invalid-regex"},
+			},
+		},
+	}
+
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, &mockProvider{})
+	if agent == nil {
+		t.Fatal("expected agent instance, got nil")
+	}
+
+	if _, ok := agent.Tools.Get("exec"); ok {
+		t.Fatal("exec tool should not be registered when exec config is invalid")
+	}
+
+	if _, ok := agent.Tools.Get("read_file"); !ok {
+		t.Fatal("read_file tool should still be registered")
 	}
 }
