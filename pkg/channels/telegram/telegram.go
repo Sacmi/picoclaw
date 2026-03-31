@@ -374,6 +374,31 @@ func (c *TelegramChannel) DeleteTopic(ctx context.Context, chatID string) error 
 	return nil
 }
 
+// RenameForumTopic implements channels.TopicRenamer.
+func (c *TelegramChannel) RenameForumTopic(ctx context.Context, chatID string, name string) error {
+	if !c.IsRunning() {
+		return channels.ErrNotRunning
+	}
+
+	cid, threadID, err := parseTelegramChatID(chatID)
+	if err != nil {
+		return fmt.Errorf("invalid Telegram topic ID: %w", err)
+	}
+	if threadID <= 0 {
+		return fmt.Errorf("RenameForumTopic requires a topic chat ID (chatID/threadID)")
+	}
+
+	params := &telego.EditForumTopicParams{
+		ChatID:          tu.ID(cid),
+		MessageThreadID: threadID,
+		Name:            name,
+	}
+	if err := c.bot.EditForumTopic(ctx, params); err != nil {
+		return fmt.Errorf("failed to rename Telegram topic: %w", err)
+	}
+	return nil
+}
+
 // EditMessage implements channels.MessageEditor.
 func (c *TelegramChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
 	useMarkdownV2 := c.config.Channels.Telegram.UseMarkdownV2

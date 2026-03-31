@@ -306,6 +306,10 @@ func setupAndStartServices(
 		logger.InfoCF("voice", "Transcription enabled (agent-level)", map[string]any{"provider": transcriber.Name()})
 	}
 
+	if tn := agent.NewTopicNamer(cfg); tn != nil {
+		agentLoop.SetTopicNamer(tn)
+	}
+
 	enabledChannels := runningServices.ChannelManager.GetEnabledChannels()
 	if len(enabledChannels) > 0 {
 		fmt.Printf("✓ Channels enabled: %s\n", enabledChannels)
@@ -534,6 +538,8 @@ func restartServices(
 	} else {
 		logger.InfoCF("voice", "Transcription disabled", nil)
 	}
+
+	al.SetTopicNamer(agent.NewTopicNamer(cfg))
 
 	return nil
 }

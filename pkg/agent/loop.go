@@ -52,6 +52,7 @@ type AgentLoop struct {
 	channelManager *channels.Manager
 	mediaStore     media.MediaStore
 	transcriber    voice.Transcriber
+	topicNamer     *topicNamer
 	cmdRegistry    *commands.Registry
 	mcp            mcpRuntime
 	hookRuntime    hookRuntime
@@ -643,6 +644,58 @@ func (al *AgentLoop) publishResponseIfNeeded(ctx context.Context, channel, chatI
 		})
 }
 
+// maybeRenameTopicAsync renames a forum topic asynchronously after the first message exchange.
+// It fires only when the session was empty before this turn (initialHistoryLen == 0) and the
+// chat ID is a composite "chatID/threadID", indicating a forum topic.
+func (al *AgentLoop) maybeRenameTopicAsync(msg bus.InboundMessage, initialHistoryLen int, response string) {
+	if al.topicNamer == nil || al.channelManager == nil {
+		return
+	}
+	if response == "" || initialHistoryLen != 0 {
+		return
+	}
+	if !strings.Contains(msg.ChatID, "/") {
+		return
+	}
+
+	userMessage := msg.Content
+	channel := msg.Channel
+	chatID := msg.ChatID
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		name, err := al.topicNamer.GenerateName(ctx, userMessage, response)
+		if err != nil {
+			logger.WarnCF("agent", "Failed to generate topic name", map[string]any{
+				"channel": channel,
+				"chat_id": chatID,
+				"error":   err.Error(),
+			})
+			return
+		}
+		if name == "" {
+			return
+		}
+
+		if err := al.channelManager.RenameForumTopic(ctx, channel, chatID, name); err != nil {
+			logger.WarnCF("agent", "Failed to rename forum topic", map[string]any{
+				"channel": channel,
+				"chat_id": chatID,
+				"name":    name,
+				"error":   err.Error(),
+			})
+		} else {
+			logger.InfoCF("agent", "Renamed forum topic", map[string]any{
+				"channel": channel,
+				"chat_id": chatID,
+				"name":    name,
+			})
+		}
+	}()
+}
+
 func (al *AgentLoop) buildContinuationTarget(msg bus.InboundMessage) (*continuationTarget, error) {
 	if msg.Channel == "system" {
 		return nil, nil
@@ -1044,6 +1097,11 @@ func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 // SetTranscriber injects a voice transcriber for agent-level audio transcription.
 func (al *AgentLoop) SetTranscriber(t voice.Transcriber) {
 	al.transcriber = t
+}
+
+// SetTopicNamer sets the topic namer used to generate short names for new forum topics.
+func (al *AgentLoop) SetTopicNamer(tn *topicNamer) {
+	al.topicNamer = tn
 }
 
 // SetReloadFunc sets the callback function for triggering config reload.
@@ -1485,6 +1543,7 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	ts := newTurnState(agent, opts, al.newTurnEventScope(agent.ID, opts.SessionKey))
+	initialHistoryLen := ts.initialHistoryLength
 	result, err := al.runTurn(ctx, ts)
 	if err != nil {
 		return "", err
@@ -1520,6 +1579,12 @@ func (al *AgentLoop) runAgentLoop(
 				"iterations":   ts.currentIteration(),
 				"final_length": len(result.finalContent),
 			})
+
+		al.maybeRenameTopicAsync(bus.InboundMessage{
+			Channel: opts.Channel,
+			ChatID:  opts.ChatID,
+			Content: opts.UserMessage,
+		}, initialHistoryLen, result.finalContent)
 	}
 
 	return result.finalContent, nil

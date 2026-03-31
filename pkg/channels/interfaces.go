@@ -68,3 +68,9 @@ type PlaceholderRecorder interface {
 type CommandRegistrarCapable interface {
 	RegisterCommands(ctx context.Context, defs []commands.Definition) error
 }
+
+// TopicRenamer — channels that can rename a forum topic.
+// chatID uses the composite "chatID/threadID" format.
+type TopicRenamer interface {
+	RenameForumTopic(ctx context.Context, chatID string, name string) error
+}

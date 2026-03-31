@@ -926,6 +926,19 @@ func (m *Manager) GetChannel(name string) (Channel, bool) {
 	return channel, ok
 }
 
+// RenameForumTopic renames a forum topic on the given channel if it supports TopicRenamer.
+func (m *Manager) RenameForumTopic(ctx context.Context, channelName, chatID, name string) error {
+	ch, ok := m.GetChannel(channelName)
+	if !ok {
+		return fmt.Errorf("channel %q not found", channelName)
+	}
+	renamer, ok := ch.(TopicRenamer)
+	if !ok {
+		return fmt.Errorf("channel %q does not support topic renaming", channelName)
+	}
+	return renamer.RenameForumTopic(ctx, chatID, name)
+}
+
 func (m *Manager) GetStatus() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
