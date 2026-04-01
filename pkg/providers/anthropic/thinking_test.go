@@ -125,7 +125,7 @@ func TestBuildParams_ThinkingClearsTemperature(t *testing.T) {
 		"thinking_level": "medium",
 	}
 
-	params, err := buildParams(msgs, nil, "claude-sonnet-4-6", opts)
+	params, err := buildParams(msgs, nil, "claude-sonnet-4-6", opts, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestParseResponse_ThinkingBlock(t *testing.T) {
 		StopReason: anthropic.StopReasonEndTurn,
 	}
 
-	result := parseResponse(resp)
+	result := parseResponse(resp, nil)
 
 	if result.Reasoning != "Let me reason step by step..." {
 		t.Errorf("Reasoning = %q, want thinking content", result.Reasoning)
@@ -182,7 +182,7 @@ func TestParseResponse_NoThinkingBlock(t *testing.T) {
 		StopReason: anthropic.StopReasonEndTurn,
 	}
 
-	result := parseResponse(resp)
+	result := parseResponse(resp, nil)
 
 	if result.Reasoning != "" {
 		t.Errorf("Reasoning = %q, want empty", result.Reasoning)
@@ -198,7 +198,7 @@ func TestBuildParams_NoThinkingKeepsTemperature(t *testing.T) {
 		"temperature": 0.8,
 	}
 
-	params, err := buildParams(msgs, nil, "claude-sonnet-4-6", opts)
+	params, err := buildParams(msgs, nil, "claude-sonnet-4-6", opts, false)
 	if err != nil {
 		t.Fatal(err)
 	}

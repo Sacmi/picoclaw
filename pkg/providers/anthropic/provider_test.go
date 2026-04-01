@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestBuildParams_BasicMessage(t *testing.T) {
 	}
 	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{
 		"max_tokens": 1024,
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("buildParams() error: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestBuildParams_SystemMessage(t *testing.T) {
 		{Role: "system", Content: "You are helpful"},
 		{Role: "user", Content: "Hi"},
 	}
-	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{})
+	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{}, false)
 	if err != nil {
 		t.Fatalf("buildParams() error: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestBuildParams_ToolCallMessage(t *testing.T) {
 		},
 		{Role: "tool", Content: `{"temp": 72}`, ToolCallID: "call_1"},
 	}
-	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{})
+	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{}, false)
 	if err != nil {
 		t.Fatalf("buildParams() error: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestBuildParams_WithTools(t *testing.T) {
 			},
 		},
 	}
-	params, err := buildParams([]Message{{Role: "user", Content: "Hi"}}, tools, "claude-sonnet-4.6", map[string]any{})
+	params, err := buildParams([]Message{{Role: "user", Content: "Hi"}}, tools, "claude-sonnet-4.6", map[string]any{}, false)
 	if err != nil {
 		t.Fatalf("buildParams() error: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestParseResponse_TextOnly(t *testing.T) {
 			OutputTokens: 20,
 		},
 	}
-	result := parseResponse(resp)
+	result := parseResponse(resp, nil)
 	if result.Usage.PromptTokens != 10 {
 		t.Errorf("PromptTokens = %d, want 10", result.Usage.PromptTokens)
 	}
@@ -136,10 +137,76 @@ func TestParseResponse_StopReasons(t *testing.T) {
 		resp := &anthropic.Message{
 			StopReason: tt.stopReason,
 		}
-		result := parseResponse(resp)
+		result := parseResponse(resp, nil)
 		if result.FinishReason != tt.want {
 			t.Errorf("StopReason %q: FinishReason = %q, want %q", tt.stopReason, result.FinishReason, tt.want)
 		}
+	}
+}
+
+func TestBuildParams_OAuthAddsClaudeCodeIdentity(t *testing.T) {
+	params, err := buildParams(
+		[]Message{
+			{Role: "system", Content: "You are helpful"},
+			{Role: "user", Content: "Hi"},
+		},
+		nil,
+		"claude-sonnet-4.6",
+		map[string]any{},
+		true,
+	)
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	if len(params.System) != 2 {
+		t.Fatalf("len(System) = %d, want 2", len(params.System))
+	}
+	if params.System[0].Text != anthropicOAuthIdentityPrompt {
+		t.Fatalf("System[0].Text = %q, want %q", params.System[0].Text, anthropicOAuthIdentityPrompt)
+	}
+	if params.System[1].Text != "You are helpful" {
+		t.Fatalf("System[1].Text = %q, want %q", params.System[1].Text, "You are helpful")
+	}
+}
+
+func TestBuildParams_OAuthCanonicalizesClaudeCodeToolNames(t *testing.T) {
+	params, err := buildParams(
+		[]Message{
+			{Role: "user", Content: "Inspect file"},
+			{
+				Role: "assistant",
+				ToolCalls: []ToolCall{{
+					ID:        "call_1",
+					Name:      "read",
+					Arguments: map[string]any{"path": "/tmp/a"},
+				}},
+			},
+		},
+		[]ToolDefinition{{
+			Type: "function",
+			Function: ToolFunctionDefinition{
+				Name: "read",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+		}},
+		"claude-sonnet-4.6",
+		map[string]any{},
+		true,
+	)
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+
+	reqBody, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	body := string(reqBody)
+	if !strings.Contains(body, `"name":"Read"`) {
+		t.Fatalf("request body does not contain canonical Claude Code tool name: %s", body)
 	}
 }
 
@@ -220,6 +287,10 @@ func TestProvider_ChatUsesTokenSource(t *testing.T) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		if got := r.Header.Get("Anthropic-Beta"); got != strings.Join(expectedAnthropicOAuthBetas("claude-sonnet-4.6", nil), ",") {
+			http.Error(w, "missing oauth betas", http.StatusBadRequest)
+			return
+		}
 
 		var reqBody map[string]any
 		json.NewDecoder(r.Body).Decode(&reqBody)
@@ -271,8 +342,8 @@ func TestProvider_ChatStreamingRoundTrip(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer refreshed-token" {
 			t.Errorf("Authorization = %q, want %q", got, "Bearer refreshed-token")
 		}
-		if got := r.Header.Get("Anthropic-Beta"); got != anthropicBetaHeader {
-			t.Errorf("Anthropic-Beta = %q, want %q", got, anthropicBetaHeader)
+		if got := r.Header.Get("Anthropic-Beta"); got != strings.Join(expectedAnthropicOAuthBetas("claude-sonnet-4.6", nil), ",") {
+			t.Errorf("Anthropic-Beta = %q, want %q", got, strings.Join(expectedAnthropicOAuthBetas("claude-sonnet-4.6", nil), ","))
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -321,10 +392,64 @@ func TestProvider_ChatStreamingRoundTrip(t *testing.T) {
 	}
 }
 
+func TestProvider_ChatOAuthStripsSDKHeadersAndDisablesRetries(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+
+		if got := r.Header.Get("Anthropic-Beta"); got != strings.Join(expectedAnthropicOAuthBetas("claude-sonnet-4.6", nil), ",") {
+			t.Errorf("Anthropic-Beta = %q, want %q", got, strings.Join(expectedAnthropicOAuthBetas("claude-sonnet-4.6", nil), ","))
+		}
+		if got := r.Header.Get("User-Agent"); got != anthropicOAuthUserAgent {
+			t.Errorf("User-Agent = %q, want %q", got, anthropicOAuthUserAgent)
+		}
+		if got := r.Header.Get("X-App"); got != "cli" {
+			t.Errorf("X-App = %q, want %q", got, "cli")
+		}
+		if got := r.Header.Get("Anthropic-Dangerous-Direct-Browser-Access"); got != "true" {
+			t.Errorf("Anthropic-Dangerous-Direct-Browser-Access = %q, want %q", got, "true")
+		}
+		for _, header := range strippedAnthropicOAuthHeaders {
+			if got := r.Header.Get(header); got != "" {
+				t.Errorf("%s = %q, want empty", header, got)
+			}
+		}
+
+		http.Error(w, `{"type":"error","error":{"type":"rate_limit_error","message":"Error"}}`, http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	p := NewProviderWithTokenSourceAndBaseURL("stale-token", func() (string, error) {
+		return "refreshed-token", nil
+	}, server.URL)
+
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hello"}},
+		nil,
+		"claude-sonnet-4.6",
+		map[string]any{},
+	)
+	if err == nil {
+		t.Fatal("Chat() error = nil, want rate limit error")
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+}
+
 func createAnthropicTestClient(baseURL, token string) *anthropic.Client {
 	c := anthropic.NewClient(
 		anthropicoption.WithAuthToken(token),
 		anthropicoption.WithBaseURL(baseURL),
 	)
 	return &c
+}
+
+func expectedAnthropicOAuthBetas(model string, options map[string]any) []string {
+	betas := append([]string{}, baseAnthropicOAuthBetas...)
+	if needsInterleavedThinkingBeta(model, options) {
+		betas = append(betas, "interleaved-thinking-2025-05-14")
+	}
+	return betas
 }

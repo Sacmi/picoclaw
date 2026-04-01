@@ -24,9 +24,30 @@ type (
 )
 
 const (
-	defaultBaseURL      = "https://api.anthropic.com"
-	anthropicBetaHeader = "oauth-2025-04-20"
+	defaultBaseURL    = "https://api.anthropic.com"
+	claudeCodeVersion = "2.1.75"
 )
+
+var baseAnthropicOAuthBetas = []string{
+	"claude-code-20250219",
+	"oauth-2025-04-20",
+	"fine-grained-tool-streaming-2025-05-14",
+}
+
+const anthropicOAuthIdentityPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+
+const anthropicOAuthUserAgent = "claude-cli/" + claudeCodeVersion
+
+var strippedAnthropicOAuthHeaders = []string{
+	"X-Stainless-Lang",
+	"X-Stainless-Package-Version",
+	"X-Stainless-OS",
+	"X-Stainless-Arch",
+	"X-Stainless-Runtime",
+	"X-Stainless-Runtime-Version",
+	"X-Stainless-Retry-Count",
+	"X-Stainless-Timeout",
+}
 
 type Provider struct {
 	client      *anthropic.Client
@@ -70,6 +91,27 @@ func NewProviderWithTokenSourceAndBaseURL(token string, tokenSource func() (stri
 	return p
 }
 
+func buildAnthropicOAuthRequestOptions(token, model string, options map[string]any) []option.RequestOption {
+	betas := append([]string{}, baseAnthropicOAuthBetas...)
+	if needsInterleavedThinkingBeta(model, options) {
+		betas = append(betas, "interleaved-thinking-2025-05-14")
+	}
+
+	opts := []option.RequestOption{
+		option.WithAuthToken(token),
+		option.WithHeader("accept", "application/json"),
+		option.WithHeader("anthropic-dangerous-direct-browser-access", "true"),
+		option.WithHeader("anthropic-beta", strings.Join(betas, ",")),
+		option.WithHeader("User-Agent", anthropicOAuthUserAgent),
+		option.WithHeader("x-app", "cli"),
+		option.WithMaxRetries(0),
+	}
+	for _, header := range strippedAnthropicOAuthHeaders {
+		opts = append(opts, option.WithHeaderDel(header))
+	}
+	return opts
+}
+
 func (p *Provider) Chat(
 	ctx context.Context,
 	messages []Message,
@@ -77,26 +119,23 @@ func (p *Provider) Chat(
 	model string,
 	options map[string]any,
 ) (*LLMResponse, error) {
+	params, err := buildParams(messages, tools, model, options, p.tokenSource != nil)
+	if err != nil {
+		return nil, err
+	}
+
 	var opts []option.RequestOption
 	if p.tokenSource != nil {
 		tok, err := p.tokenSource()
 		if err != nil {
 			return nil, fmt.Errorf("refreshing token: %w", err)
 		}
-		opts = append(opts,
-			option.WithAuthToken(tok),
-			option.WithHeader("anthropic-beta", anthropicBetaHeader),
-		)
-	}
-
-	params, err := buildParams(messages, tools, model, options)
-	if err != nil {
-		return nil, err
+		opts = append(opts, buildAnthropicOAuthRequestOptions(tok, model, options)...)
 	}
 
 	// OAuth/setup-tokens require streaming; API keys use non-streaming.
 	if p.tokenSource != nil {
-		return p.chatStreaming(ctx, params, opts)
+		return p.chatStreaming(ctx, params, tools, opts)
 	}
 
 	resp, err := p.client.Messages.New(ctx, params, opts...)
@@ -104,12 +143,13 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("claude API call: %w", err)
 	}
 
-	return parseResponse(resp), nil
+	return parseResponse(resp, tools), nil
 }
 
 func (p *Provider) chatStreaming(
 	ctx context.Context,
 	params anthropic.MessageNewParams,
+	tools []ToolDefinition,
 	opts []option.RequestOption,
 ) (*LLMResponse, error) {
 	stream := p.client.Messages.NewStreaming(ctx, params, opts...)
@@ -126,7 +166,7 @@ func (p *Provider) chatStreaming(
 		return nil, fmt.Errorf("claude API call: %w", err)
 	}
 
-	return parseResponse(&msg), nil
+	return parseResponse(&msg, tools), nil
 }
 
 func (p *Provider) GetDefaultModel() string {
@@ -142,6 +182,7 @@ func buildParams(
 	tools []ToolDefinition,
 	model string,
 	options map[string]any,
+	isOAuth bool,
 ) (anthropic.MessageNewParams, error) {
 	var system []anthropic.TextBlockParam
 	var anthropicMessages []anthropic.MessageParam
@@ -184,6 +225,10 @@ func buildParams(
 					if tc.Name == "" {
 						continue
 					}
+					name := tc.Name
+					if isOAuth {
+						name = toClaudeCodeName(name)
+					}
 					args := tc.Arguments
 					if args == nil && tc.Function != nil && tc.Function.Arguments != "" {
 						if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
@@ -193,7 +238,7 @@ func buildParams(
 					if args == nil {
 						args = map[string]any{}
 					}
-					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, args, tc.Name))
+					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, args, name))
 				}
 				anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
 			} else {
@@ -223,6 +268,10 @@ func buildParams(
 		MaxTokens: maxTokens,
 	}
 
+	if isOAuth {
+		system = append([]anthropic.TextBlockParam{{Text: anthropicOAuthIdentityPrompt}}, system...)
+	}
+
 	if len(system) > 0 {
 		params.System = system
 	}
@@ -232,7 +281,7 @@ func buildParams(
 	}
 
 	if len(tools) > 0 {
-		params.Tools = translateTools(tools)
+		params.Tools = translateTools(tools, isOAuth)
 	}
 
 	// Extended Thinking / Adaptive Thinking
@@ -309,11 +358,15 @@ func levelToBudget(level string) int {
 	}
 }
 
-func translateTools(tools []ToolDefinition) []anthropic.ToolUnionParam {
+func translateTools(tools []ToolDefinition, isOAuth bool) []anthropic.ToolUnionParam {
 	result := make([]anthropic.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
+		name := t.Function.Name
+		if isOAuth {
+			name = toClaudeCodeName(name)
+		}
 		tool := anthropic.ToolParam{
-			Name: t.Function.Name,
+			Name: name,
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: t.Function.Parameters["properties"],
 			},
@@ -335,7 +388,7 @@ func translateTools(tools []ToolDefinition) []anthropic.ToolUnionParam {
 	return result
 }
 
-func parseResponse(resp *anthropic.Message) *LLMResponse {
+func parseResponse(resp *anthropic.Message, tools []ToolDefinition) *LLMResponse {
 	var content strings.Builder
 	var reasoning strings.Builder
 	var toolCalls []ToolCall
@@ -357,7 +410,7 @@ func parseResponse(resp *anthropic.Message) *LLMResponse {
 			}
 			toolCalls = append(toolCalls, ToolCall{
 				ID:        tu.ID,
-				Name:      tu.Name,
+				Name:      fromClaudeCodeName(tu.Name, tools),
 				Arguments: args,
 			})
 		}
@@ -401,4 +454,63 @@ func normalizeBaseURL(apiBase string) string {
 	}
 
 	return base
+}
+
+var claudeCodeTools = []string{
+	"Read",
+	"Write",
+	"Edit",
+	"Bash",
+	"Grep",
+	"Glob",
+	"AskUserQuestion",
+	"EnterPlanMode",
+	"ExitPlanMode",
+	"KillShell",
+	"NotebookEdit",
+	"Skill",
+	"Task",
+	"TaskOutput",
+	"TodoWrite",
+	"WebFetch",
+	"WebSearch",
+}
+
+var claudeCodeToolLookup = func() map[string]string {
+	lookup := make(map[string]string, len(claudeCodeTools))
+	for _, name := range claudeCodeTools {
+		lookup[strings.ToLower(name)] = name
+	}
+	return lookup
+}()
+
+func toClaudeCodeName(name string) string {
+	if canonical, ok := claudeCodeToolLookup[strings.ToLower(name)]; ok {
+		return canonical
+	}
+	return name
+}
+
+func fromClaudeCodeName(name string, tools []ToolDefinition) string {
+	lowerName := strings.ToLower(name)
+	for _, tool := range tools {
+		if strings.ToLower(tool.Function.Name) == lowerName {
+			return tool.Function.Name
+		}
+	}
+	return name
+}
+
+func needsInterleavedThinkingBeta(model string, options map[string]any) bool {
+	if options != nil {
+		if enabled, ok := options["interleaved_thinking"].(bool); ok {
+			return enabled && !supportsAdaptiveThinking(model)
+		}
+	}
+	return !supportsAdaptiveThinking(model)
+}
+
+func supportsAdaptiveThinking(model string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(model, ".", "-"))
+	return strings.Contains(normalized, "claude-sonnet-4-6") || strings.Contains(normalized, "claude-opus-4-6")
 }
