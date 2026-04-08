@@ -78,6 +78,79 @@ func TestBuildParams_ToolCallMessage(t *testing.T) {
 	}
 }
 
+func TestBuildParams_SkipsEmptyAssistantAfterFilteringInvalidToolCalls(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "Use a tool"},
+		{
+			Role:    "assistant",
+			Content: "",
+			ToolCalls: []ToolCall{
+				{
+					ID:        "call_1",
+					Name:      "",
+					Arguments: map[string]any{"ignored": true},
+				},
+			},
+		},
+		{Role: "user", Content: "Follow-up"},
+	}
+
+	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{}, false)
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+
+	if len(params.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", len(params.Messages))
+	}
+
+	reqBody, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	body := string(reqBody)
+	if strings.Contains(body, `{"role":"assistant"}`) {
+		t.Fatalf("request body contains assistant message without content: %s", body)
+	}
+}
+
+func TestBuildParams_SkipsToolResultWithoutMatchingEmittedToolUse(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "Use a tool"},
+		{
+			Role:    "assistant",
+			Content: "",
+			ToolCalls: []ToolCall{
+				{
+					ID:        "call_1",
+					Name:      "",
+					Arguments: map[string]any{"ignored": true},
+				},
+			},
+		},
+		{Role: "tool", Content: `{"ignored": true}`, ToolCallID: "call_1"},
+		{Role: "user", Content: "Follow-up"},
+	}
+
+	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{}, false)
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+
+	if len(params.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", len(params.Messages))
+	}
+
+	reqBody, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	body := string(reqBody)
+	if strings.Contains(body, `"tool_use_id":"call_1"`) {
+		t.Fatalf("request body contains orphaned tool_result: %s", body)
+	}
+}
+
 func TestBuildParams_WithTools(t *testing.T) {
 	tools := []ToolDefinition{
 		{

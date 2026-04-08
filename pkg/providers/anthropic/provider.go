@@ -186,6 +186,7 @@ func buildParams(
 ) (anthropic.MessageNewParams, error) {
 	var system []anthropic.TextBlockParam
 	var anthropicMessages []anthropic.MessageParam
+	var pendingToolUseIDs map[string]struct{}
 
 	for _, msg := range messages {
 		switch msg.Role {
@@ -206,10 +207,15 @@ func buildParams(
 			}
 		case "user":
 			if msg.ToolCallID != "" {
+				if _, ok := pendingToolUseIDs[msg.ToolCallID]; !ok {
+					continue
+				}
 				anthropicMessages = append(anthropicMessages,
 					anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.Content, false)),
 				)
+				delete(pendingToolUseIDs, msg.ToolCallID)
 			} else {
+				pendingToolUseIDs = nil
 				anthropicMessages = append(anthropicMessages,
 					anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)),
 				)
@@ -217,12 +223,13 @@ func buildParams(
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				var blocks []anthropic.ContentBlockParamUnion
+				emittedToolUseIDs := make(map[string]struct{}, len(msg.ToolCalls))
 				if msg.Content != "" {
 					blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
 				}
 				for _, tc := range msg.ToolCalls {
 					// Skip tool calls with empty names to avoid API errors
-					if tc.Name == "" {
+					if tc.Name == "" || tc.ID == "" {
 						continue
 					}
 					name := tc.Name
@@ -239,17 +246,32 @@ func buildParams(
 						args = map[string]any{}
 					}
 					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, args, name))
+					emittedToolUseIDs[tc.ID] = struct{}{}
+				}
+				if len(blocks) == 0 {
+					pendingToolUseIDs = nil
+					continue
 				}
 				anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
+				if len(emittedToolUseIDs) > 0 {
+					pendingToolUseIDs = emittedToolUseIDs
+				} else {
+					pendingToolUseIDs = nil
+				}
 			} else {
+				pendingToolUseIDs = nil
 				anthropicMessages = append(anthropicMessages,
 					anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)),
 				)
 			}
 		case "tool":
+			if _, ok := pendingToolUseIDs[msg.ToolCallID]; !ok {
+				continue
+			}
 			anthropicMessages = append(anthropicMessages,
 				anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.Content, false)),
 			)
+			delete(pendingToolUseIDs, msg.ToolCallID)
 		}
 	}
 
