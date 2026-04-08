@@ -15,6 +15,7 @@
 | `openrouter`         | LLM (推荐，可访问所有模型)   | [openrouter.ai](https://openrouter.ai)                               |
 | `anthropic`          | LLM (Claude 直连)            | [console.anthropic.com](https://console.anthropic.com)               |
 | `openai`             | LLM (GPT 直连)               | [platform.openai.com](https://platform.openai.com)                   |
+| `venice`             | LLM (Venice AI 直连)         | [venice.ai](https://venice.ai)                                       |
 | `deepseek`           | LLM (DeepSeek 直连)          | [platform.deepseek.com](https://platform.deepseek.com)               |
 | `qwen`               | LLM (通义千问)               | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `groq`               | LLM + **语音转录** (Whisper) | [console.groq.com](https://console.groq.com)                         |
@@ -26,6 +27,7 @@
 | `mistral`            | LLM (Mistral 直连)           | [console.mistral.ai](https://console.mistral.ai)                    |
 | `longcat`            | LLM (Longcat 直连)           | [longcat.ai](https://longcat.ai)                                     |
 | `modelscope`         | LLM (ModelScope 直连)        | [modelscope.cn](https://modelscope.cn)                               |
+| `mimo`               | LLM (小米 MiMo 直连)         | [platform.xiaomimimo.com](https://platform.xiaomimimo.com)           |
 
 ### 模型配置 (model_list)
 
@@ -43,6 +45,7 @@
 | 厂商                | `model` 前缀      | 默认 API Base                                       | 协议      | 获取 API Key                                                      |
 | ------------------- | ----------------- | --------------------------------------------------- | --------- | ----------------------------------------------------------------- |
 | **OpenAI**          | `openai/`         | `https://api.openai.com/v1`                         | OpenAI    | [获取密钥](https://platform.openai.com)                           |
+| **Venice AI**       | `venice/`         | `https://api.venice.ai/api/v1`                      | OpenAI    | [获取密钥](https://venice.ai)                                     |
 | **Anthropic**       | `anthropic/`      | `https://api.anthropic.com/v1`                      | Anthropic | [获取密钥](https://console.anthropic.com)                         |
 | **智谱 AI (GLM)**   | `zhipu/`          | `https://open.bigmodel.cn/api/paas/v4`              | OpenAI    | [获取密钥](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) |
 | **DeepSeek**        | `deepseek/`       | `https://api.deepseek.com/v1`                       | OpenAI    | [获取密钥](https://platform.deepseek.com)                         |
@@ -52,6 +55,7 @@
 | **通义千问 (Qwen)** | `qwen/`           | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI    | [获取密钥](https://dashscope.console.aliyun.com)                  |
 | **NVIDIA**          | `nvidia/`         | `https://integrate.api.nvidia.com/v1`               | OpenAI    | [获取密钥](https://build.nvidia.com)                              |
 | **Ollama**          | `ollama/`         | `http://localhost:11434/v1`                         | OpenAI    | 本地（无需密钥）                                                  |
+| **LM Studio**       | `lmstudio/`       | `http://localhost:1234/v1`                          | OpenAI    | 可选（本地默认无需密钥）                                          |
 | **OpenRouter**      | `openrouter/`     | `https://openrouter.ai/api/v1`                      | OpenAI    | [获取密钥](https://openrouter.ai/keys)                            |
 | **LiteLLM Proxy**   | `litellm/`        | `http://localhost:4000/v1`                          | OpenAI    | 你的 LiteLLM 代理密钥                                             |
 | **VLLM**            | `vllm/`           | `http://localhost:8000/v1`                          | OpenAI    | 本地                                                              |
@@ -62,6 +66,7 @@
 | **Vivgrid**         | `vivgrid/`        | `https://api.vivgrid.com/v1`                        | OpenAI    | [获取密钥](https://vivgrid.com)                                   |
 | **LongCat**         | `longcat/`        | `https://api.longcat.chat/openai`                   | OpenAI    | [获取密钥](https://longcat.chat/platform)                         |
 | **ModelScope (魔搭)**| `modelscope/`    | `https://api-inference.modelscope.cn/v1`            | OpenAI    | [获取 Token](https://modelscope.cn/my/tokens)                    |
+| **小米 MiMo**       | `mimo/`           | `https://api.xiaomimimo.com/v1`                     | OpenAI    | [获取密钥](https://platform.xiaomimimo.com)                      |
 | **Antigravity**     | `antigravity/`    | Google Cloud                                        | 自定义    | 仅 OAuth                                                          |
 | **GitHub Copilot**  | `github-copilot/` | `localhost:4321`                                    | gRPC      | -                                                                 |
 
@@ -73,22 +78,22 @@
     {
       "model_name": "ark-code-latest",
       "model": "volcengine/ark-code-latest",
-      "api_key": "sk-your-api-key"
+      "api_keys": ["sk-your-api-key"]
     },
     {
       "model_name": "gpt-5.4",
       "model": "openai/gpt-5.4",
-      "api_key": "sk-your-openai-key"
+      "api_keys": ["sk-your-openai-key"]
     },
     {
       "model_name": "claude-sonnet-4.6",
       "model": "anthropic/claude-sonnet-4.6",
-      "api_key": "sk-ant-your-key"
+      "api_keys": ["sk-ant-your-key"]
     },
     {
       "model_name": "glm-4.7",
       "model": "zhipu/glm-4.7",
-      "api_key": "your-zhipu-key"
+      "api_keys": ["your-zhipu-key"]
     }
   ],
   "agents": {
@@ -98,6 +103,24 @@
   }
 }
 ```
+
+#### `model_list` 条目字段
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model_name` | string | 是 | 在 agent 配置中引用此模型的唯一名称 |
+| `model` | string | 是 | 厂商/模型标识符（如 `openai/gpt-5.4`、`azure/gpt-5.4`、`anthropic/claude-sonnet-4.6`） |
+| `api_keys` | string[] | 是* | 认证密钥。多个密钥可按请求轮换。本地 provider（Ollama、LM Studio、VLLM）不需要 |
+| `api_base` | string | 否 | 覆盖默认的 API 端点 URL |
+| `proxy` | string | 否 | 此模型条目的 HTTP 代理 URL |
+| `user_agent` | string | 否 | 自定义 `User-Agent` 请求头（支持 OpenAI 兼容、Anthropic 和 Azure provider） |
+| `request_timeout` | int | 否 | 请求超时时间（秒），默认值因 provider 而异 |
+| `max_tokens_field` | string | 否 | 覆盖请求体中 max tokens 的字段名（如 o1 模型使用 `max_completion_tokens`） |
+| `thinking_level` | string | 否 | 扩展思考级别：`off`、`low`、`medium`、`high`、`xhigh` 或 `adaptive` |
+| `extra_body` | object | 否 | 注入到每个请求体中的额外字段 |
+| `rpm` | int | 否 | 每分钟请求速率限制 |
+| `fallbacks` | string[] | 否 | 自动故障转移的备用模型名称 |
+| `enabled` | bool | 否 | 是否启用此模型条目（默认：`true`） |
 
 #### 语音转录
 
@@ -111,7 +134,7 @@
     {
       "model_name": "voice-gemini",
       "model": "gemini/gemini-2.5-flash",
-      "api_key": "your-gemini-key"
+      "api_keys": ["your-gemini-key"]
     }
   ],
   "voice": {
@@ -134,7 +157,7 @@
 {
   "model_name": "gpt-5.4",
   "model": "openai/gpt-5.4",
-  "api_key": "sk-..."
+  "api_keys": ["sk-..."]
 }
 ```
 
@@ -144,7 +167,7 @@
 {
   "model_name": "ark-code-latest",
   "model": "volcengine/ark-code-latest",
-  "api_key": "sk-..."
+  "api_keys": ["sk-..."]
 }
 ```
 
@@ -154,7 +177,7 @@
 {
   "model_name": "glm-4.7",
   "model": "zhipu/glm-4.7",
-  "api_key": "your-key"
+  "api_keys": ["your-key"]
 }
 ```
 
@@ -164,7 +187,7 @@
 {
   "model_name": "deepseek-chat",
   "model": "deepseek/deepseek-chat",
-  "api_key": "sk-..."
+  "api_keys": ["sk-..."]
 }
 ```
 
@@ -188,7 +211,7 @@
 {
   "model_name": "claude-opus-4-6",
   "model": "anthropic-messages/claude-opus-4-6",
-  "api_key": "sk-ant-your-key",
+  "api_keys": ["sk-ant-your-key"],
   "api_base": "https://api.anthropic.com"
 }
 ```
@@ -209,6 +232,18 @@
 }
 ```
 
+**LM Studio（本地）**
+
+```json
+{
+  "model_name": "lmstudio-local",
+  "model": "lmstudio/openai/gpt-oss-20b"
+}
+```
+
+`api_base` 默认是 `http://localhost:1234/v1`。除非你在 LM Studio 侧启用了认证，否则不需要配置 API Key。
+PicoClaw 向 LM Studio 的 OpenAI 兼容终结点发送请求，且将移除首个 `lmstudio/` 前缀，因此 `lmstudio/openai/gpt-oss-20b` 会发送 `openai/gpt-oss-20b`。
+
 **自定义代理/API**
 
 ```json
@@ -216,7 +251,8 @@
   "model_name": "my-custom-model",
   "model": "openai/custom-model",
   "api_base": "https://my-proxy.com/v1",
-  "api_key": "sk-...",
+  "api_keys": ["sk-..."],
+  "user_agent": "MyApp/1.0",
   "request_timeout": 300
 }
 ```
@@ -228,7 +264,7 @@
   "model_name": "lite-gpt4",
   "model": "litellm/lite-gpt4",
   "api_base": "http://localhost:4000/v1",
-  "api_key": "sk-..."
+  "api_keys": ["sk-..."]
 }
 ```
 
@@ -245,21 +281,60 @@ PicoClaw 在发送请求前仅去除外层 `litellm/` 前缀，因此 `litellm/l
       "model_name": "gpt-5.4",
       "model": "openai/gpt-5.4",
       "api_base": "https://api1.example.com/v1",
-      "api_key": "sk-key1"
+      "api_keys": ["sk-key1"]
     },
     {
       "model_name": "gpt-5.4",
       "model": "openai/gpt-5.4",
       "api_base": "https://api2.example.com/v1",
-      "api_key": "sk-key2"
+      "api_keys": ["sk-key2"]
     }
   ]
 }
 ```
 
+#### 自动模型失败切换（Cascade）
+
+当你在 Agent 的模型设置里配置 `primary` + `fallbacks` 时，PicoClaw 已经支持自动失败切换。
+运行时 fallback 链会在可重试错误时切到下一个候选（例如 HTTP `429`、配额/限流错误、超时错误）。
+同时会对每个候选应用 cooldown，避免对刚失败的目标立即重试。
+
+```json
+{
+  "model_list": [
+    {
+      "model_name": "qwen-main",
+      "model": "openai/qwen3.5:cloud",
+      "api_base": "https://api.example.com/v1",
+      "api_keys": ["sk-main"]
+    },
+    {
+      "model_name": "deepseek-backup",
+      "model": "deepseek/deepseek-chat",
+      "api_keys": ["sk-backup-1"]
+    },
+    {
+      "model_name": "gemini-backup",
+      "model": "gemini/gemini-2.5-flash",
+      "api_keys": ["sk-backup-2"]
+    }
+  ],
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "qwen-main",
+        "fallbacks": ["deepseek-backup", "gemini-backup"]
+      }
+    }
+  }
+}
+```
+
+如果你在同一模型上启用了 key 级失败切换，PicoClaw 会先在该模型的多 key 候选间切换，再继续切到跨模型备选。
+
 #### 从旧的 `providers` 配置迁移
 
-旧的 `providers` 配置格式**已弃用**，但为向后兼容仍支持。
+旧的 `providers` 配置格式**已弃用**，V2 中已移除。现有 V0/V1 配置会自动迁移。
 
 **旧配置（已弃用）：**
 
@@ -284,11 +359,12 @@ PicoClaw 在发送请求前仅去除外层 `litellm/` 前缀，因此 `litellm/l
 
 ```json
 {
+  "version": 2,
   "model_list": [
     {
       "model_name": "glm-4.7",
       "model": "zhipu/glm-4.7",
-      "api_key": "your-key"
+      "api_keys": ["your-key"]
     }
   ],
   "agents": {

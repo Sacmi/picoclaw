@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -26,6 +25,7 @@ type ContextBuilder struct {
 	memory             *MemoryStore
 	toolDiscoveryBM25  bool
 	toolDiscoveryRegex bool
+	splitOnMarker      bool
 
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
@@ -52,15 +52,13 @@ func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuil
 	return cb
 }
 
+func (cb *ContextBuilder) WithSplitOnMarker(enabled bool) *ContextBuilder {
+	cb.splitOnMarker = enabled
+	return cb
+}
+
 func getGlobalConfigDir() string {
-	if home := os.Getenv(config.EnvHome); home != "" {
-		return home
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, pkg.DefaultPicoClawHome)
+	return config.GetHome()
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
@@ -155,6 +153,14 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 	memoryContext := cb.memory.GetMemoryContext()
 	if memoryContext != "" {
 		parts = append(parts, "# Memory\n\n"+memoryContext)
+	}
+
+	// Multi-Message Sending (if enabled)
+	if cb.splitOnMarker {
+		parts = append(parts, `# MULTI-MESSAGE OUTPUT
+You MUST frequently use <|[SPLIT]|> to break your responses into multiple short messages. NEVER output a single long wall of text. Actively split distinct concepts or parts. Example: Message part 1<|[SPLIT]|>Message part 2<|[SPLIT]|>Message part 3
+
+Each part separated by the marker will be sent as an independent message.`)
 	}
 
 	// Join with "---" separator
@@ -596,14 +602,16 @@ func (cb *ContextBuilder) BuildMessages(
 	// Add conversation history
 	messages = append(messages, history...)
 
-	// Add current user message
-	if strings.TrimSpace(currentMessage) != "" {
+	// Add current user message. Media-only turns must still be preserved so
+	// multimodal providers receive the uploaded image even when the user sends
+	// no accompanying text.
+	if strings.TrimSpace(currentMessage) != "" || len(media) > 0 {
 		msg := providers.Message{
 			Role:    "user",
 			Content: currentMessage,
 		}
 		if len(media) > 0 {
-			msg.Media = media
+			msg.Media = append([]string(nil), media...)
 		}
 		messages = append(messages, msg)
 	}

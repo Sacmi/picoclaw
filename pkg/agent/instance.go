@@ -48,6 +48,9 @@ type AgentInstance struct {
 	// LightCandidates holds the resolved provider candidates for the light model.
 	// Pre-computed at agent creation to avoid repeated model_list lookups at runtime.
 	LightCandidates []providers.FallbackCandidate
+	// LightProvider is the concrete provider instance for the configured light model.
+	// It is only used when routing selects the light tier for a turn.
+	LightProvider providers.LLMProvider
 }
 
 // NewAgentInstance creates an agent instance from config.
@@ -74,7 +77,12 @@ func NewAgentInstance(
 
 	if cfg.Tools.IsToolEnabled("read_file") {
 		maxReadFileSize := cfg.Tools.ReadFile.MaxReadFileSize
-		toolsRegistry.Register(tools.NewReadFileTool(workspace, readRestrict, maxReadFileSize, allowReadPaths))
+		switch cfg.Tools.ReadFile.EffectiveMode() {
+		case config.ReadFileModeLines:
+			toolsRegistry.Register(tools.NewReadFileLinesTool(workspace, readRestrict, maxReadFileSize, allowReadPaths))
+		default:
+			toolsRegistry.Register(tools.NewReadFileBytesTool(workspace, readRestrict, maxReadFileSize, allowReadPaths))
+		}
 	}
 	if cfg.Tools.IsToolEnabled("write_file") {
 		toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict, allowWritePaths))
@@ -103,10 +111,12 @@ func NewAgentInstance(
 	sessions := initSessionStore(sessionsDir)
 
 	mcpDiscoveryActive := cfg.Tools.MCP.Enabled && cfg.Tools.MCP.Discovery.Enabled
-	contextBuilder := NewContextBuilder(workspace).WithToolDiscovery(
-		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseBM25,
-		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
-	)
+	contextBuilder := NewContextBuilder(workspace).
+		WithToolDiscovery(
+			mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseBM25,
+			mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
+		).
+		WithSplitOnMarker(cfg.Agents.Defaults.SplitOnMarker)
 
 	agentID := routing.DefaultAgentID
 	agentName := ""
@@ -169,14 +179,28 @@ func NewAgentInstance(
 	// to avoid repeated model_list lookups on every incoming message.
 	var router *routing.Router
 	var lightCandidates []providers.FallbackCandidate
+	var lightProvider providers.LLMProvider
 	if rc := defaults.Routing; rc != nil && rc.Enabled && rc.LightModel != "" {
 		resolved := resolveModelCandidates(cfg, defaults.Provider, rc.LightModel, nil)
 		if len(resolved) > 0 {
-			router = routing.New(routing.RouterConfig{
-				LightModel: rc.LightModel,
-				Threshold:  rc.Threshold,
-			})
-			lightCandidates = resolved
+			lightModelCfg, err := resolvedModelConfig(cfg, rc.LightModel, workspace)
+			if err != nil {
+				logger.WarnCF("agent", "Routing light model config invalid; routing disabled",
+					map[string]any{"light_model": rc.LightModel, "agent_id": agentID, "error": err.Error()})
+			} else {
+				lp, _, err := providers.CreateProviderFromConfig(lightModelCfg)
+				if err != nil {
+					logger.WarnCF("agent", "Routing light model provider init failed; routing disabled",
+						map[string]any{"light_model": rc.LightModel, "agent_id": agentID, "error": err.Error()})
+				} else {
+					router = routing.New(routing.RouterConfig{
+						LightModel: rc.LightModel,
+						Threshold:  rc.Threshold,
+					})
+					lightCandidates = resolved
+					lightProvider = lp
+				}
+			}
 		} else {
 			logger.WarnCF("agent", "Routing light model not found; routing disabled",
 				map[string]any{"light_model": rc.LightModel, "agent_id": agentID})
@@ -205,6 +229,7 @@ func NewAgentInstance(
 		Candidates:                candidates,
 		Router:                    router,
 		LightCandidates:           lightCandidates,
+		LightProvider:             lightProvider,
 	}
 }
 

@@ -3,6 +3,7 @@ export type JsonRecord = Record<string, unknown>
 export interface CoreConfigForm {
   workspace: string
   restrictToWorkspace: boolean
+  splitOnMarker: boolean
   toolFeedbackEnabled: boolean
   toolFeedbackMaxArgsLength: string
   execEnabled: boolean
@@ -29,6 +30,7 @@ export interface LauncherForm {
   port: string
   publicAccess: boolean
   allowedCIDRsText: string
+  launcherToken: string
 }
 
 export const DM_SCOPE_OPTIONS = [
@@ -65,7 +67,8 @@ export const DM_SCOPE_OPTIONS = [
 export const EMPTY_FORM: CoreConfigForm = {
   workspace: "",
   restrictToWorkspace: true,
-  toolFeedbackEnabled: true,
+  splitOnMarker: false,
+  toolFeedbackEnabled: false,
   toolFeedbackMaxArgsLength: "300",
   execEnabled: true,
   allowRemote: true,
@@ -91,6 +94,7 @@ export const EMPTY_LAUNCHER_FORM: LauncherForm = {
   port: "18800",
   publicAccess: false,
   allowedCIDRsText: "",
+  launcherToken: "",
 }
 
 function asRecord(value: unknown): JsonRecord {
@@ -136,6 +140,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       defaults.restrict_to_workspace === undefined
         ? EMPTY_FORM.restrictToWorkspace
         : asBool(defaults.restrict_to_workspace),
+    splitOnMarker:
+      defaults.split_on_marker === undefined
+        ? EMPTY_FORM.splitOnMarker
+        : asBool(defaults.split_on_marker),
     toolFeedbackEnabled:
       toolFeedback.enabled === undefined
         ? EMPTY_FORM.toolFeedbackEnabled

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -24,23 +25,25 @@ import (
 
 type fakeChannel struct{ id string }
 
-func (f *fakeChannel) Name() string                                            { return "fake" }
-func (f *fakeChannel) Start(ctx context.Context) error                         { return nil }
-func (f *fakeChannel) Stop(ctx context.Context) error                          { return nil }
-func (f *fakeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error { return nil }
-func (f *fakeChannel) IsRunning() bool                                         { return true }
-func (f *fakeChannel) IsAllowed(string) bool                                   { return true }
-func (f *fakeChannel) IsAllowedSender(sender bus.SenderInfo) bool              { return true }
-func (f *fakeChannel) ReasoningChannelID() string                              { return f.id }
+func (f *fakeChannel) Name() string                    { return "fake" }
+func (f *fakeChannel) Start(ctx context.Context) error { return nil }
+func (f *fakeChannel) Stop(ctx context.Context) error  { return nil }
+func (f *fakeChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeChannel) IsRunning() bool                            { return true }
+func (f *fakeChannel) IsAllowed(string) bool                      { return true }
+func (f *fakeChannel) IsAllowedSender(sender bus.SenderInfo) bool { return true }
+func (f *fakeChannel) ReasoningChannelID() string                 { return f.id }
 
 type fakeMediaChannel struct {
 	fakeChannel
 	sentMedia []bus.OutboundMediaMessage
 }
 
-func (f *fakeMediaChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessage) error {
+func (f *fakeMediaChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessage) ([]string, error) {
 	f.sentMedia = append(f.sentMedia, msg)
-	return nil
+	return nil, nil
 }
 
 func newStartedTestChannelManager(
@@ -529,6 +532,20 @@ func TestToolContext_Updates(t *testing.T) {
 	// Empty context returns empty strings
 	if got := tools.ToolChannel(context.Background()); got != "" {
 		t.Errorf("expected empty channel from bare context, got %q", got)
+	}
+
+	inboundCtx := tools.WithToolInboundContext(
+		context.Background(),
+		"telegram",
+		"chat-42",
+		"msg-123",
+		"msg-100",
+	)
+	if got := tools.ToolMessageID(inboundCtx); got != "msg-123" {
+		t.Errorf("expected messageID 'msg-123', got %q", got)
+	}
+	if got := tools.ToolReplyToMessageID(inboundCtx); got != "msg-100" {
+		t.Errorf("expected replyToMessageID 'msg-100', got %q", got)
 	}
 }
 
@@ -1295,6 +1312,46 @@ func newChatCompletionTestServer(
 	}))
 }
 
+func newStrictChatCompletionTestServer(
+	t *testing.T,
+	label string,
+	expectedModel string,
+	response string,
+	calls *int,
+) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("%s server path = %q, want /chat/completions", label, r.URL.Path)
+		}
+		*calls = *calls + 1
+		defer r.Body.Close()
+
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode %s request: %v", label, err)
+		}
+		if req.Model != expectedModel {
+			t.Fatalf("%s server model = %q, want %q", label, req.Model, expectedModel)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{
+					"message":       map[string]any{"content": response},
+					"finish_reason": "stop",
+				},
+			},
+		}); err != nil {
+			t.Fatalf("encode %s response: %v", label, err)
+		}
+	}))
+}
+
 func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, msg bus.InboundMessage) string {
 	// Use a short timeout to avoid hanging
 	timeoutCtx, cancel := context.WithTimeout(ctx, responseTimeout)
@@ -1466,24 +1523,16 @@ func TestProcessMessage_SwitchModelShowModelConsistency(t *testing.T) {
 				ModelName: "local",
 				Model:     "openai/local-model",
 				APIBase:   "https://local.example.invalid/v1",
+				APIKeys:   config.SimpleSecureStrings("test-key"),
 			},
 			{
 				ModelName: "deepseek",
 				Model:     "openrouter/deepseek/deepseek-v3.2",
 				APIBase:   "https://openrouter.ai/api/v1",
+				APIKeys:   config.SimpleSecureStrings("test-key"),
 			},
 		},
 	}
-	cfg.WithSecurity(&config.SecurityConfig{
-		ModelList: map[string]config.ModelSecurityEntry{
-			"local": {
-				APIKeys: []string{"test-key"},
-			},
-			"deepseek": {
-				APIKeys: []string{"test-key"},
-			},
-		},
-	})
 
 	msgBus := bus.NewMessageBus()
 	provider := &countingMockProvider{response: "LLM reply"}
@@ -1545,16 +1594,10 @@ func TestProcessMessage_SwitchModelRejectsUnknownAlias(t *testing.T) {
 				ModelName: "local",
 				Model:     "openai/local-model",
 				APIBase:   "https://local.example.invalid/v1",
+				APIKeys:   config.SimpleSecureStrings("test-key"),
 			},
 		},
 	}
-	cfg.WithSecurity(&config.SecurityConfig{
-		ModelList: map[string]config.ModelSecurityEntry{
-			"local": {
-				APIKeys: []string{"test-key"},
-			},
-		},
-	})
 
 	msgBus := bus.NewMessageBus()
 	provider := &countingMockProvider{response: "LLM reply"}
@@ -1626,24 +1669,16 @@ func TestProcessMessage_SwitchModelRoutesSubsequentRequestsToSelectedProvider(t 
 				ModelName: "local",
 				Model:     "openai/Qwen3.5-35B-A3B",
 				APIBase:   localServer.URL,
+				APIKeys:   config.SimpleSecureStrings("local-key"),
 			},
 			{
 				ModelName: "deepseek",
 				Model:     "openrouter/deepseek/deepseek-v3.2",
 				APIBase:   remoteServer.URL,
+				APIKeys:   config.SimpleSecureStrings("remote-key"),
 			},
 		},
 	}
-	cfg.WithSecurity(&config.SecurityConfig{
-		ModelList: map[string]config.ModelSecurityEntry{
-			"local": {
-				APIKeys: []string{"local-key"},
-			},
-			"deepseek": {
-				APIKeys: []string{"remote-key"},
-			},
-		},
-	})
 
 	msgBus := bus.NewMessageBus()
 	provider, _, err := providers.CreateProvider(cfg)
@@ -1715,6 +1750,92 @@ func TestProcessMessage_SwitchModelRoutesSubsequentRequestsToSelectedProvider(t 
 			remoteModel,
 			"deepseek-v3.2",
 		)
+	}
+}
+
+func TestProcessMessage_ModelRoutingUsesLightProvider(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	heavyCalls := 0
+	heavyServer := newStrictChatCompletionTestServer(
+		t,
+		"heavy",
+		"gemini-2.5-flash",
+		"heavy reply",
+		&heavyCalls,
+	)
+	defer heavyServer.Close()
+
+	lightCalls := 0
+	lightServer := newStrictChatCompletionTestServer(
+		t,
+		"light",
+		"qwen2.5:0.5b",
+		"light reply",
+		&lightCalls,
+	)
+	defer lightServer.Close()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "gemini-main",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+				Routing: &config.RoutingConfig{
+					Enabled:    true,
+					LightModel: "qwen-light",
+					Threshold:  0.99,
+				},
+			},
+		},
+		ModelList: []*config.ModelConfig{
+			{
+				ModelName: "gemini-main",
+				Model:     "gemini/gemini-2.5-flash",
+				APIBase:   heavyServer.URL,
+				APIKeys:   config.SimpleSecureStrings("heavy-key"),
+			},
+			{
+				ModelName: "qwen-light",
+				Model:     "ollama/qwen2.5:0.5b",
+				APIBase:   lightServer.URL,
+				APIKeys:   config.SimpleSecureStrings("light-key"),
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider, _, err := providers.CreateProvider(cfg)
+	if err != nil {
+		t.Fatalf("CreateProvider() error = %v", err)
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	helper := testHelper{al: al}
+
+	resp := helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "hi",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+	})
+	if resp != "light reply" {
+		t.Fatalf("response = %q, want %q", resp, "light reply")
+	}
+	if heavyCalls != 0 {
+		t.Fatalf("heavy calls = %d, want 0", heavyCalls)
+	}
+	if lightCalls != 1 {
+		t.Fatalf("light calls = %d, want 1", lightCalls)
 	}
 }
 
@@ -2342,7 +2463,7 @@ func TestProcessMessage_PublishesReasoningContentToReasoningChannel(t *testing.T
 		if outbound.Content != "thinking trace" {
 			t.Fatalf("reasoning content = %q, want %q", outbound.Content, "thinking trace")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(3 * time.Second):
 		t.Fatal("expected reasoning content to be published to reasoning channel")
 	}
 }
@@ -2815,5 +2936,113 @@ func TestFilterClientWebSearch_EmptyInput(t *testing.T) {
 	result := filterClientWebSearch(nil)
 	if len(result) != 0 {
 		t.Fatalf("len(result) = %d, want 0", len(result))
+	}
+}
+
+type overflowProvider struct {
+	calls        int
+	lastMessages []providers.Message
+	chatFunc     func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]any) (*providers.LLMResponse, error)
+}
+
+func (p *overflowProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.calls++
+	p.lastMessages = append([]providers.Message(nil), messages...)
+
+	if p.chatFunc != nil {
+		return p.chatFunc(ctx, messages, tools, model, opts)
+	}
+
+	if p.calls == 1 {
+		return nil, errors.New("context_window_exceeded")
+	}
+
+	return &providers.LLMResponse{
+		Content: "Recovered from overflow",
+	}, nil
+}
+
+func (p *overflowProvider) GetDefaultModel() string {
+	return "test-model"
+}
+
+func TestProcessMessage_ContextOverflowRecovery(t *testing.T) {
+	al, cfg, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+	_ = cfg
+
+	provider := &overflowProvider{}
+	al.registry = NewAgentRegistry(al.cfg, provider)
+
+	sessionKey := "agent:main:test-session"
+	agent := al.GetRegistry().GetDefaultAgent()
+
+	for i := 0; i < 5; i++ {
+		agent.Sessions.AddFullMessage(sessionKey, providers.Message{Role: "user", Content: "heavy message"})
+		agent.Sessions.AddFullMessage(sessionKey, providers.Message{Role: "assistant", Content: "response"})
+	}
+
+	response, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		ChatID:     "chat1",
+		SenderID:   "user1",
+		SessionKey: "test-session",
+		Content:    "trigger recovery",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "Recovered from overflow" {
+		t.Fatalf("response = %q, want %q", response, "Recovered from overflow")
+	}
+
+	if provider.calls != 2 {
+		t.Fatalf("expected 2 calls, got %d", provider.calls)
+	}
+}
+
+func TestProcessMessage_ContextOverflow_AnthropicStyle(t *testing.T) {
+	al, cfg, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+	_ = cfg
+
+	provider := &overflowProvider{}
+	al.registry = NewAgentRegistry(al.cfg, provider)
+
+	recoveryMsg := "error: status 400: context_window_exceeded"
+
+	provider.chatFunc = func(
+		ctx context.Context,
+		messages []providers.Message,
+		tools []providers.ToolDefinition,
+		model string,
+		opts map[string]any,
+	) (*providers.LLMResponse, error) {
+		if provider.calls == 1 {
+			return nil, errors.New(recoveryMsg)
+		}
+		return &providers.LLMResponse{Content: "Anthropic recovery success"}, nil
+	}
+
+	response, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "test",
+		ChatID:   "chat1",
+		SenderID: "user1",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if !strings.Contains(response, "Anthropic recovery success") {
+		t.Fatalf("response = %q, want success message", response)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("expected 2 calls for retry, got %d", provider.calls)
 	}
 }

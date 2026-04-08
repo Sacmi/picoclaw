@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +106,13 @@ func successResponse(t *testing.T) *ta.Response {
 	return &ta.Response{Ok: true, Result: b}
 }
 
+func successUserResponse(t *testing.T, user *telego.User) *ta.Response {
+	t.Helper()
+	b, err := json.Marshal(user)
+	require.NoError(t, err)
+	return &ta.Response{Ok: true, Result: b}
+}
+
 // newTestChannel creates a TelegramChannel with a mocked bot for unit testing.
 func newTestChannel(t *testing.T, caller *stubCaller) *TelegramChannel {
 	return newTestChannelWithConstructor(t, caller, &stubConstructor{})
@@ -169,7 +177,7 @@ func TestSendMedia_ImageFallbacksToDocumentOnInvalidDimensions(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	err = ch.SendMedia(context.Background(), bus.OutboundMediaMessage{
+	_, err = ch.SendMedia(context.Background(), bus.OutboundMediaMessage{
 		ChatID: "12345",
 		Parts: []bus.MediaPart{{
 			Type:    "image",
@@ -207,7 +215,7 @@ func TestSendMedia_ImageNonDimensionErrorDoesNotFallback(t *testing.T) {
 	ref, err := store.Store(localPath, media.MediaMeta{Filename: "image.png", ContentType: "image/png"}, "scope-1")
 	require.NoError(t, err)
 
-	err = ch.SendMedia(context.Background(), bus.OutboundMediaMessage{
+	_, err = ch.SendMedia(context.Background(), bus.OutboundMediaMessage{
 		ChatID: "12345",
 		Parts: []bus.MediaPart{{
 			Type: "image",
@@ -232,7 +240,7 @@ func TestSend_EmptyContent(t *testing.T) {
 	}
 	ch := newTestChannel(t, caller)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: "",
 	})
@@ -249,7 +257,7 @@ func TestSend_ShortMessage_SingleCall(t *testing.T) {
 	}
 	ch := newTestChannel(t, caller)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: "Hello, world!",
 	})
@@ -272,7 +280,7 @@ func TestSend_LongMessage_SingleCall(t *testing.T) {
 
 	longContent := strings.Repeat("a", 4000)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: longContent,
 	})
@@ -295,7 +303,7 @@ func TestSend_HTMLFallback_PerChunk(t *testing.T) {
 	}
 	ch := newTestChannel(t, caller)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: "Hello **world**",
 	})
@@ -313,7 +321,7 @@ func TestSend_HTMLFallback_BothFail(t *testing.T) {
 	}
 	ch := newTestChannel(t, caller)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: "Hello",
 	})
@@ -335,7 +343,7 @@ func TestSend_LongMessage_HTMLFallback_StopsOnError(t *testing.T) {
 
 	longContent := strings.Repeat("x", 4001)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: longContent,
 	})
@@ -365,7 +373,7 @@ func TestSend_MarkdownShortButHTMLLong_MultipleCalls(t *testing.T) {
 		"HTML expansion must exceed Telegram limit for this test to be meaningful",
 	)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: markdownContent,
 	})
@@ -400,7 +408,7 @@ func TestSend_HTMLOverflow_WordBoundary(t *testing.T) {
 	// Ensure the test content matches the intended boundary conditions.
 	assert.LessOrEqual(t, len([]rune(content)), 4000, "markdown content must not exceed chunk size for this test")
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "123456",
 		Content: content,
 	})
@@ -436,7 +444,7 @@ func TestSend_NotRunning(t *testing.T) {
 	ch := newTestChannel(t, caller)
 	ch.SetRunning(false)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "12345",
 		Content: "Hello",
 	})
@@ -454,7 +462,7 @@ func TestSend_InvalidChatID(t *testing.T) {
 	}
 	ch := newTestChannel(t, caller)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "not-a-number",
 		Content: "Hello",
 	})
@@ -511,7 +519,7 @@ func TestSend_WithForumThreadID(t *testing.T) {
 	}
 	ch := newTestChannel(t, caller)
 
-	err := ch.Send(context.Background(), bus.OutboundMessage{
+	_, err := ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:  "-1001234567890/42",
 		Content: "Hello from topic",
 	})
@@ -672,6 +680,181 @@ func TestHandleMessage_ReplyThread_NonForum_NoIsolation(t *testing.T) {
 	// No parent peer metadata
 	assert.Empty(t, inbound.Metadata["parent_peer_kind"])
 	assert.Empty(t, inbound.Metadata["parent_peer_id"])
+}
+
+func assertHandleMessageQuotedUserReply(
+	t *testing.T,
+	chatID int64,
+	messageID int,
+	userID int64,
+	userName string,
+	userText string,
+	replyMessageID int,
+	replyText string,
+	replyCaption string,
+	replyAuthorID int64,
+	replyAuthorName string,
+	expectedContent string,
+) {
+	t.Helper()
+
+	messageBus := bus.NewMessageBus()
+	ch := &TelegramChannel{
+		BaseChannel: channels.NewBaseChannel("telegram", nil, messageBus, nil),
+		chatIDs:     make(map[string]int64),
+		ctx:         context.Background(),
+	}
+
+	msg := &telego.Message{
+		Text:      userText,
+		MessageID: messageID,
+		Chat: telego.Chat{
+			ID:   chatID,
+			Type: "private",
+		},
+		From: &telego.User{
+			ID:        userID,
+			FirstName: userName,
+		},
+		ReplyToMessage: &telego.Message{
+			MessageID: replyMessageID,
+			Text:      replyText,
+			Caption:   replyCaption,
+			From: &telego.User{
+				ID:        replyAuthorID,
+				FirstName: replyAuthorName,
+			},
+		},
+	}
+
+	err := ch.handleMessage(context.Background(), msg)
+	require.NoError(t, err)
+
+	inbound, ok := <-messageBus.InboundChan()
+	require.True(t, ok)
+	assert.Equal(t, strconv.Itoa(replyMessageID), inbound.Metadata["reply_to_message_id"])
+	assert.Equal(t, expectedContent, inbound.Content)
+}
+
+func TestHandleMessage_ReplyToMessage_PrependsQuotedTextAndMetadata(t *testing.T) {
+	assertHandleMessageQuotedUserReply(
+		t,
+		456,
+		21,
+		11,
+		"Alice",
+		"follow up",
+		99,
+		"old context",
+		"",
+		12,
+		"Bob",
+		"[quoted user message from Bob]: old context\n\nfollow up",
+	)
+}
+
+func TestHandleMessage_ReplyToMessage_UsesCaptionWhenQuotedTextMissing(t *testing.T) {
+	assertHandleMessageQuotedUserReply(
+		t,
+		789,
+		22,
+		13,
+		"Carol",
+		"answer this",
+		100,
+		"",
+		"caption context",
+		14,
+		"Dave",
+		"[quoted user message from Dave]: caption context\n\nanswer this",
+	)
+}
+
+func TestHandleMessage_ReplyToOwnBotMessage_UsesAssistantRole(t *testing.T) {
+	messageBus := bus.NewMessageBus()
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			if strings.Contains(url, "getMe") {
+				return successUserResponse(t, &telego.User{
+					ID:        42,
+					IsBot:     true,
+					FirstName: "Pico",
+					Username:  "afjcjsbx_picoclaw_bot",
+				}), nil
+			}
+			t.Fatalf("unexpected API call: %s", url)
+			return nil, nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+	ch.BaseChannel = channels.NewBaseChannel("telegram", nil, messageBus, nil)
+	ch.ctx = context.Background()
+
+	msg := &telego.Message{
+		Text:      "ti ricordi questo file?",
+		MessageID: 23,
+		Chat: telego.Chat{
+			ID:   999,
+			Type: "private",
+		},
+		From: &telego.User{
+			ID:        15,
+			FirstName: "Eve",
+		},
+		ReplyToMessage: &telego.Message{
+			MessageID: 101,
+			Text:      "Fatto! Ho creato il file notizie_2026_03_28.md",
+			From: &telego.User{
+				ID:        42,
+				IsBot:     true,
+				FirstName: "Pico",
+				Username:  "afjcjsbx_picoclaw_bot",
+			},
+		},
+	}
+
+	err := ch.handleMessage(context.Background(), msg)
+	require.NoError(t, err)
+
+	inbound, ok := <-messageBus.InboundChan()
+	require.True(t, ok)
+	assert.Equal(t, "101", inbound.Metadata["reply_to_message_id"])
+	assert.Equal(
+		t,
+		"[quoted assistant message from afjcjsbx_picoclaw_bot]: Fatto! Ho creato il file notizie_2026_03_28.md\n\nti ricordi questo file?",
+		inbound.Content,
+	)
+}
+
+func TestTelegramQuotedContent_IncludesVoiceMarkerAlongsideCaption(t *testing.T) {
+	msg := &telego.Message{
+		Caption: "listen to this",
+		Voice: &telego.Voice{
+			FileID: "voice-file",
+		},
+	}
+
+	assert.Equal(t, "listen to this\n[voice]", telegramQuotedContent(msg))
+}
+
+func TestQuotedTelegramMediaRefs_ResolvesQuotedAudioInOrder(t *testing.T) {
+	msg := &telego.Message{
+		Voice: &telego.Voice{FileID: "voice-file"},
+		Audio: &telego.Audio{FileID: "audio-file"},
+	}
+
+	var calls []string
+	refs := quotedTelegramMediaRefs(msg, func(fileID, ext, filename string) string {
+		calls = append(calls, fileID+"|"+ext+"|"+filename)
+		return "ref://" + filename
+	})
+
+	assert.Equal(
+		t,
+		[]string{"voice-file|.ogg|voice.ogg", "audio-file|.mp3|audio.mp3"},
+		calls,
+	)
+	assert.Equal(t, []string{"ref://voice.ogg", "ref://audio.mp3"}, refs)
 }
 
 func TestHandleMessage_PrivateChatTopic_SetsMetadata(t *testing.T) {

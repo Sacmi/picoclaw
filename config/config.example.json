@@ -10,6 +10,7 @@
       "max_tool_iterations": 20,
       "summarize_message_threshold": 20,
       "summarize_token_percent": 75,
+      "split_on_marker": false,
       "tool_feedback": {
         "enabled": false,
         "max_args_length": 300
@@ -46,6 +47,15 @@
       "model_name": "deepseek",
       "model": "deepseek/deepseek-chat",
       "api_key": "sk-your-deepseek-key"
+    },
+    {
+      "model_name": "venice-uncensored",
+      "model": "venice/venice-uncensored",
+      "api_key": "your-venice-api-key"
+    },
+    {
+      "model_name": "lmstudio-local",
+      "model": "lmstudio/openai/gpt-oss-20b"
     },
     {
       "model_name": "longcat",
@@ -129,6 +139,10 @@
       "encrypt_key": "",
       "verification_token": "",
       "allow_from": [],
+      "placeholder": {
+        "enabled": true,
+        "text": ["Thinking...", "Processing...", "Typing..."]
+      },
       "reasoning_channel_id": "",
       "random_reaction_emoji": [],
       "is_lark": false
@@ -160,7 +174,7 @@
       },
       "placeholder": {
         "enabled": true,
-        "text": "Thinking... 💭"
+        "text": ["Thinking...", "Processing...", "Typing..."]
       },
       "reasoning_channel_id": "",
       "crypto_database_path": "",
@@ -223,13 +237,8 @@
       "nickserv_password": "",
       "sasl_user": "",
       "sasl_password": "",
-      "channels": [
-        "#mychannel"
-      ],
-      "request_caps": [
-        "server-time",
-        "message-tags"
-      ],
+      "channels": ["#mychannel"],
+      "request_caps": ["server-time", "message-tags"],
       "allow_from": [],
       "group_trigger": {
         "mention_only": true
@@ -251,9 +260,7 @@
       "brave": {
         "enabled": false,
         "api_key": "YOUR_BRAVE_API_KEY",
-        "api_keys": [
-          "YOUR_BRAVE_API_KEY"
-        ],
+        "api_keys": ["YOUR_BRAVE_API_KEY"],
         "max_results": 5
       },
       "tavily": {
@@ -269,9 +276,7 @@
       "perplexity": {
         "enabled": false,
         "api_key": "pplx-xxx",
-        "api_keys": [
-          "pplx-xxx"
-        ],
+        "api_keys": ["pplx-xxx"],
         "max_results": 5
       },
       "searxng": {
@@ -320,19 +325,12 @@
         "filesystem": {
           "enabled": false,
           "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-filesystem",
-            "/tmp"
-          ]
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
         },
         "github": {
           "enabled": false,
           "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-github"
-          ],
+          "args": ["-y", "@modelcontextprotocol/server-github"],
           "env": {
             "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN"
           }
@@ -340,10 +338,7 @@
         "brave-search": {
           "enabled": false,
           "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-brave-search"
-          ],
+          "args": ["-y", "@modelcontextprotocol/server-brave-search"],
           "env": {
             "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY"
           }
@@ -360,10 +355,7 @@
         "slack": {
           "enabled": false,
           "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-slack"
-          ],
+          "args": ["-y", "@modelcontextprotocol/server-slack"],
           "env": {
             "SLACK_BOT_TOKEN": "YOUR_SLACK_BOT_TOKEN",
             "SLACK_TEAM_ID": "YOUR_SLACK_TEAM_ID"
@@ -429,7 +421,11 @@
       "enabled": true
     },
     "read_file": {
-      "enabled": true
+      "enabled": true,
+      "mode": "bytes"
+    },
+    "send_tts": {
+      "enabled": false
     },
     "spawn": {
       "enabled": true
